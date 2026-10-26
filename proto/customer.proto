@@ -1,0 +1,7 @@
+syntax = "proto3";
+package ecommerce.customer.v1;
+service CustomerService {
+  rpc GetMembershipScore (CustomerRequest) returns (MembershipReply);
+}
+message CustomerRequest { int32 uid = 1; }
+message MembershipReply { int32 uid = 1; int32 mid = 2; string mname = 3; int32 score = 4; }

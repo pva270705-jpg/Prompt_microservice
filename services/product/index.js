@@ -1,0 +1,19 @@
+const mongoose=require('mongoose');
+const {appFor,listen}=require('../../lib/http');
+const {mongo}=require('../../lib/db');
+const {load,serverFor,grpc}=require('../../lib/grpc');
+async function main(){const Product=await mongo(process.env.MONGO_URL||'mongodb://localhost:27017/productdb',mongoose,()=>mongoose.model('Product',new mongoose.Schema({pid:{type:Number,unique:true,index:true},pname:{type:String,required:true,trim:true},price:{type:Number,required:true,min:0},quantity:{type:Number,required:true,min:0}},{timestamps:true})));
+ const nextPid=async()=>{const c=await mongoose.connection.collection('counters').findOneAndUpdate({_id:'products'},{$inc:{seq:1}},{upsert:true,returnDocument:'after'});return c.seq??c.value?.seq;};
+ const app=appFor('product-service');
+ app.get('/api/products',async(_req,res,next)=>{try{res.json({items:await Product.find().lean()});}catch(e){next(e);}});
+ app.get('/api/products/:pid',async(req,res,next)=>{try{const p=await Product.findOne({pid:Number(req.params.pid)}).lean();if(!p)return res.status(404).json({error:'Product not found'});res.json(p);}catch(e){next(e);}});
+ app.post('/api/products',async(req,res,next)=>{try{const {pname,price,quantity}=req.body||{};if(!pname||!Number.isFinite(Number(price))||Number(price)<0||!Number.isInteger(Number(quantity))||Number(quantity)<0)return res.status(400).json({error:'pname, non-negative price and integer quantity are required'});const p=await Product.create({pid:await nextPid(),pname,price:Number(price),quantity:Number(quantity)});res.status(201).json({pid:p.pid,pname:p.pname,price:p.price,quantity:p.quantity});}catch(e){next(e);}});
+ app.put('/api/products/:pid',async(req,res,next)=>{try{const p=await Product.findOneAndUpdate({pid:Number(req.params.pid)},req.body,{new:true,runValidators:true}).lean();if(!p)return res.status(404).json({error:'Product not found'});res.json({message:'Product updated successfully',pid:p.pid});}catch(e){if(e.name==='ValidationError')return res.status(400).json({error:e.message});next(e);}});
+ app.delete('/api/products/:pid',async(req,res,next)=>{try{const p=await Product.findOneAndDelete({pid:Number(req.params.pid)});if(!p)return res.status(404).json({error:'Product not found'});res.json({message:'Product deleted successfully',pid:p.pid});}catch(e){next(e);}});
+ const pkg=load('product.proto','ecommerce').product.v1;
+ serverFor(Number(process.env.GRPC_PORT||50053),pkg.ProductService.service,{
+  getProduct:async(call,cb)=>{try{const p=await Product.findOne({pid:call.request.pid}).lean();if(!p)return cb({code:grpc.status.NOT_FOUND,details:'Product not found'});cb(null,{pid:p.pid,pname:p.pname,price:p.price,quantity:p.quantity});}catch(e){cb({code:grpc.status.NOT_FOUND,details:'Product not found'});}},
+  reserveStock:async(call,cb)=>{try{const {pid,qty}=call.request;if(!Number.isInteger(qty)||qty<1)return cb(null,{success:false,remaining:0,error:'qty must be positive'});const p=await Product.findOneAndUpdate({pid,quantity:{$gte:qty}},{$inc:{quantity:-qty}},{new:true});if(!p){const exists=await Product.exists({pid});return cb(null,{success:false,remaining:0,error:exists?'Insufficient stock':'Product not found'});}cb(null,{success:true,remaining:p.quantity,error:''});}catch(e){cb({code:grpc.status.INTERNAL,details:e.message});}},
+  releaseStock:async(call,cb)=>{try{const {pid,qty}=call.request;if(!Number.isInteger(qty)||qty<1)return cb(null,{success:false,remaining:0,error:'qty must be positive'});const p=await Product.findOneAndUpdate({pid},{$inc:{quantity:qty}},{new:true});if(!p)return cb(null,{success:false,remaining:0,error:'Product not found'});cb(null,{success:true,remaining:p.quantity,error:''});}catch(e){cb({code:grpc.status.INTERNAL,details:e.message});}}
+ }); listen(app,Number(process.env.PORT||3003));}
+main().catch(e=>{console.error(e);process.exit(1)});

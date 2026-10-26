@@ -1,0 +1,11 @@
+syntax = "proto3";
+package ecommerce.product.v1;
+service ProductService {
+  rpc GetProduct (ProductRequest) returns (ProductReply);
+  rpc ReserveStock (ReserveStockRequest) returns (ReserveStockReply);
+  rpc ReleaseStock (ReserveStockRequest) returns (ReserveStockReply);
+}
+message ProductRequest { int32 pid = 1; }
+message ProductReply { int32 pid = 1; string pname = 2; double price = 3; int32 quantity = 4; }
+message ReserveStockRequest { int32 pid = 1; int32 qty = 2; }
+message ReserveStockReply { bool success = 1; int32 remaining = 2; string error = 3; }

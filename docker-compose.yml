@@ -1,0 +1,137 @@
+name: ecommerce-mvp
+services:
+  gateway:
+    build: .
+    command: ["node", "services/gateway/index.js"]
+    environment:
+      PORT: 3000
+      JWT_SECRET: ${JWT_SECRET:-local-dev-change-this-secret}
+      REDIS_URL: redis://redis:6379
+      AUTH_URL: http://auth-service:3001
+      CUSTOMER_URL: http://customer-service:3002
+      PRODUCT_URL: http://product-service:3003
+      ORDER_URL: http://order-service:3004
+      SHIPMENT_URL: http://shipment-service:3005
+    ports: ["3000:3000"]
+    depends_on:
+      auth-service: { condition: service_started }
+      customer-service: { condition: service_started }
+      product-service: { condition: service_started }
+      order-service: { condition: service_started }
+      shipment-service: { condition: service_started }
+      redis: { condition: service_healthy }
+    restart: unless-stopped
+
+  auth-service:
+    build: .
+    command: ["node", "services/auth/index.js"]
+    environment:
+      PORT: 3001
+      JWT_SECRET: ${JWT_SECRET:-local-dev-change-this-secret}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-ChangeMe123!}
+      DATABASE_URL: postgres://auth:authpass@auth-db:5432/authdb
+    depends_on: { auth-db: { condition: service_healthy } }
+    restart: unless-stopped
+  auth-db:
+    image: postgres:16-alpine
+    environment: { POSTGRES_USER: auth, POSTGRES_PASSWORD: authpass, POSTGRES_DB: authdb }
+    volumes: ["auth-data:/var/lib/postgresql/data"]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U auth -d authdb"], interval: 5s, timeout: 3s, retries: 15 }
+
+  customer-service:
+    build: .
+    command: ["node", "services/customer/index.js"]
+    environment:
+      PORT: 3002
+      DATABASE_URL: postgres://customer:customerpass@customer-db:5432/customerdb
+      GRPC_PORT: 50052
+    depends_on: { customer-db: { condition: service_healthy } }
+    restart: unless-stopped
+  customer-db:
+    image: postgres:16-alpine
+    environment: { POSTGRES_USER: customer, POSTGRES_PASSWORD: customerpass, POSTGRES_DB: customerdb }
+    volumes: ["customer-data:/var/lib/postgresql/data"]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U customer -d customerdb"], interval: 5s, timeout: 3s, retries: 15 }
+
+  product-service:
+    build: .
+    command: ["node", "services/product/index.js"]
+    environment:
+      PORT: 3003
+      MONGO_URL: mongodb://product-db:27017/productdb
+      GRPC_PORT: 50053
+    depends_on: { product-db: { condition: service_healthy } }
+    restart: unless-stopped
+  product-db:
+    image: mongo:7
+    volumes: ["product-data:/data/db"]
+    healthcheck: { test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ ping: 1 }).ok"], interval: 10s, timeout: 5s, retries: 15 }
+
+  order-service:
+    build: .
+    command: ["node", "services/order/index.js"]
+    environment:
+      PORT: 3004
+      DATABASE_URL: postgres://orders:orderspass@order-db:5432/orderdb
+      KAFKA_BROKERS: kafka:9092
+      CUSTOMER_GRPC: customer-service:50052
+      PRODUCT_GRPC: product-service:50053
+    depends_on:
+      order-db: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+      customer-service: { condition: service_started }
+      product-service: { condition: service_started }
+    restart: unless-stopped
+  order-db:
+    image: postgres:16-alpine
+    environment: { POSTGRES_USER: orders, POSTGRES_PASSWORD: orderspass, POSTGRES_DB: orderdb }
+    volumes: ["order-data:/var/lib/postgresql/data"]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U orders -d orderdb"], interval: 5s, timeout: 3s, retries: 15 }
+
+  shipment-service:
+    build: .
+    command: ["node", "services/shipment/index.js"]
+    environment:
+      PORT: 3005
+      MONGO_URL: mongodb://shipment-db:27017/shipmentdb
+      KAFKA_BROKERS: kafka:9092
+    depends_on:
+      shipment-db: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+    restart: unless-stopped
+  shipment-db:
+    image: mongo:7
+    volumes: ["shipment-data:/data/db"]
+    healthcheck: { test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ ping: 1 }).ok"], interval: 10s, timeout: 5s, retries: 15 }
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes: ["redis-data:/data"]
+    healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 5s, timeout: 3s, retries: 15 }
+  kafka:
+    image: apache/kafka:3.9.1
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 3
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+    healthcheck: { test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"], interval: 10s, timeout: 10s, retries: 18 }
+
+volumes:
+  auth-data:
+  customer-data:
+  order-data:
+  product-data:
+  shipment-data:
+  redis-data:
