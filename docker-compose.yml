@@ -12,14 +12,19 @@ services:
       PRODUCT_URL: http://product-service:3003
       ORDER_URL: http://order-service:3004
       SHIPMENT_URL: http://shipment-service:3005
-    ports: ["3000:3000"]
+    ports: ["3001:3000"]
     depends_on:
-      auth-service: { condition: service_started }
-      customer-service: { condition: service_started }
-      product-service: { condition: service_started }
-      order-service: { condition: service_started }
-      shipment-service: { condition: service_started }
+      auth-service: { condition: service_healthy }
+      customer-service: { condition: service_healthy }
+      product-service: { condition: service_healthy }
+      order-service: { condition: service_healthy }
+      shipment-service: { condition: service_healthy }
       redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
     restart: unless-stopped
 
   auth-service:
@@ -32,6 +37,11 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-ChangeMe123!}
       DATABASE_URL: postgres://auth:authpass@auth-db:5432/authdb
     depends_on: { auth-db: { condition: service_healthy } }
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
     restart: unless-stopped
   auth-db:
     image: postgres:16-alpine
@@ -47,6 +57,11 @@ services:
       DATABASE_URL: postgres://customer:customerpass@customer-db:5432/customerdb
       GRPC_PORT: 50052
     depends_on: { customer-db: { condition: service_healthy } }
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3002/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
     restart: unless-stopped
   customer-db:
     image: postgres:16-alpine
@@ -62,6 +77,11 @@ services:
       MONGO_URL: mongodb://product-db:27017/productdb
       GRPC_PORT: 50053
     depends_on: { product-db: { condition: service_healthy } }
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3003/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
     restart: unless-stopped
   product-db:
     image: mongo:7
@@ -77,11 +97,17 @@ services:
       KAFKA_BROKERS: kafka:9092
       CUSTOMER_GRPC: customer-service:50052
       PRODUCT_GRPC: product-service:50053
+      DISCOUNT_RULES_JSON: ${DISCOUNT_RULES_JSON:-}
     depends_on:
       order-db: { condition: service_healthy }
       kafka: { condition: service_healthy }
-      customer-service: { condition: service_started }
-      product-service: { condition: service_started }
+      customer-service: { condition: service_healthy }
+      product-service: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3004/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
     restart: unless-stopped
   order-db:
     image: postgres:16-alpine
@@ -99,6 +125,11 @@ services:
     depends_on:
       shipment-db: { condition: service_healthy }
       kafka: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3005/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
     restart: unless-stopped
   shipment-db:
     image: mongo:7
